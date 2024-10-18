@@ -3,6 +3,38 @@ import logging
 import sys
 from copy import deepcopy
 
+#majdi
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super(CBAM, self).__init__()
+        self.channel_attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, channels // reduction, 1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(channels // reduction, channels, 1, padding=0),
+            nn.Sigmoid()
+        )
+        
+        self.spatial_attention = nn.Sequential(
+            nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        # الانتباه القنوي
+        avg_pool = torch.mean(x, dim=(2, 3), keepdim=True)
+        max_pool = torch.max(x, dim=(2, 3), keepdim=True)[0]
+        channel_attention = self.channel_attention(avg_pool + max_pool)
+        x = x * channel_attention
+
+        # الانتباه المكاني
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        spatial_attention = self.spatial_attention(torch.cat([avg_out, max_out], dim=1))
+        x = x * spatial_attention
+        
+        return x
+# /majdi
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
 import torch
@@ -799,8 +831,11 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = ch[f] // args[0] ** 2
         else:
             c2 = ch[f]
+        #Last code
+        #m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+        # Adding CBAM after the layer definition _New
+        m_ = nn.Sequential(*[m(*args), CBAM(c2)] for _ in range(n)) if n > 1 else nn.Sequential(m(*args), CBAM(c2))  # Add CBAM here
 
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
